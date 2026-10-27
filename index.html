@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="名刺帳">
+<meta name="theme-color" content="#23477a">
+<title>名刺帳</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;700&family=IBM+Plex+Mono:wght@500&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<style>
+/* Layout: 1カラムの名刺ホルダー。一覧 → 詳細 → 編集をハッシュで切り替え */
+:root{
+  --paper:#eef1f4; --card:#ffffff; --ink:#18212b; --muted:#5b6876;
+  --line:#d6dde4; --accent:#23477a; --accent-soft:#e3eaf5; --danger:#b3261e;
+  --f-body:"Zen Kaku Gothic New","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#0f141a; --card:#18202a; --ink:#e6ecf2; --muted:#9aa7b4;
+  --line:#2a3542; --accent:#86aae6; --accent-soft:#1d2a3d; --danger:#f2867e; color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--paper);color:var(--ink);font:15px/1.6 var(--f-body);
+  padding:env(safe-area-inset-top,0) max(16px,env(safe-area-inset-right,0px)) calc(96px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+[hidden]{display:none!important}
+img{max-width:100%}
+.wrap{max-width:640px;margin:0 auto}
+header{display:flex;align-items:center;gap:12px;padding-block:18px 12px}
+h1{font-size:22px;margin:0;letter-spacing:.06em;flex:1}
+h1 small{font-size:12px;color:var(--muted);font-weight:400;margin-left:8px;letter-spacing:0;font-family:var(--f-mono)}
+button,.btn{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--ink);
+  border-radius:10px;padding:9px 14px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px;justify-content:center}
+button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.primary{background:var(--accent);border-color:var(--accent);color:var(--paper);font-weight:700}
+.ghost{border-color:transparent;background:transparent;color:var(--muted)}
+.danger{color:var(--danger)}
+input[type=search],input[type=text],textarea{width:100%;font:inherit;color:var(--ink);background:var(--card);
+  border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+textarea{resize:vertical;min-height:70px;font-family:var(--f-mono);font-size:14px}
+.search{margin-bottom:14px}
+.list{display:flex;flex-direction:column;gap:10px}
+.item{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;display:grid;
+  grid-template-columns:96px 1fr;gap:12px;cursor:pointer}
+.thumb{width:96px;aspect-ratio:91/55;border-radius:4px;background:var(--accent-soft);object-fit:cover;display:block;max-width:100%}
+.meta{min-width:0}
+.meta b{display:block;font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.meta span{display:block;color:var(--muted);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chips{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-size:13px;padding:5px 10px;border-radius:999px;background:var(--accent-soft);color:var(--accent);
+  text-decoration:none;font-weight:700;display:inline-flex;gap:5px;align-items:center}
+.empty{text-align:center;color:var(--muted);padding:48px 12px;border:1px dashed var(--line);border-radius:12px}
+.empty b{display:block;color:var(--ink);font-size:17px;margin-bottom:6px}
+.fab{position:fixed;right:calc(18px + env(safe-area-inset-right,0px));bottom:calc(18px + env(safe-area-inset-bottom,0px));
+  width:60px;height:60px;border-radius:50%;font-size:30px;line-height:1;padding:0;box-shadow:0 6px 18px rgb(0 0 0/.25)}
+.sec{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:12px;margin-bottom:12px}
+.label{font-size:12px;color:var(--muted);letter-spacing:.08em;margin-bottom:4px;display:block}
+.shots{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.shot{position:relative;aspect-ratio:91/55;border:1.5px dashed var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;
+  flex-direction:column;color:var(--muted);font-size:13px;cursor:pointer;overflow:hidden;background:var(--paper);max-width:100%}
+.shot img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.shot .x{position:absolute;top:4px;right:4px;z-index:2;padding:2px 8px;font-size:12px;border-radius:6px}
+.shot strong{font-size:15px;color:var(--ink)}
+.col{display:flex;flex-direction:column;gap:6px;min-width:0}
+.ctl{display:flex;flex-direction:column;gap:6px}
+.ctl:empty{display:none}
+.seg{display:flex}
+.seg button{flex:1;padding:6px 0;font-size:12px;border-radius:0;margin-left:-1px}
+.seg button:first-child{border-radius:8px 0 0 8px;margin-left:0}
+.seg button:last-child{border-radius:0 8px 8px 0}
+.seg button[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--paper);font-weight:700;position:relative}
+.ctl-row{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+.ctl-row button{padding:5px 10px;font-size:12px}
+.prog{font-size:13px;color:var(--muted)}
+.bar{height:6px;border-radius:3px;background:var(--accent-soft);overflow:hidden;margin-top:4px}
+.bar i{display:block;height:100%;background:var(--accent);width:0;transition:width .2s}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.row>*{flex:1}
+details summary{cursor:pointer;color:var(--muted);font-size:13px}
+pre{white-space:pre-wrap;font-family:var(--f-mono);font-size:12px;color:var(--muted);margin:8px 0 0}
+.hint{font-size:12px;color:var(--muted);margin:4px 0 0}
+.d-img{width:100%;aspect-ratio:91/55;object-fit:contain;background:var(--paper);border-radius:8px;display:block}
+.tabs{display:flex;gap:6px}
+.tabs button{padding:5px 12px;font-size:13px}
+.tabs button[aria-pressed=true]{background:var(--accent);color:var(--paper);border-color:var(--accent)}
+.d-name{font-size:24px;font-weight:700;margin:0;text-wrap:balance}
+.d-sub{color:var(--muted);margin:0}
+.acts{display:flex;flex-direction:column;gap:8px}
+.act{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:4px 4px 4px 12px}
+.act a{color:var(--accent);text-decoration:none;font-family:var(--f-mono);font-size:15px;word-break:break-all;padding:8px 0;min-width:0}
+.act .tag{font-size:11px;color:var(--muted);letter-spacing:.06em;min-width:3em}
+.act button{padding:6px 10px;font-size:12px}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(90px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--paper);
+  padding:8px 16px;border-radius:999px;font-size:14px;z-index:20}
+@media (prefers-reduced-motion:reduce){.bar i{transition:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<!-- 一覧 -->
+<section id="v-list">
+  <header>
+    <h1>名刺帳<small id="count"></small></h1>
+    <a class="btn ghost" href="#menu" aria-label="バックアップ">保存・書き出し</a>
+  </header>
+  <input id="q" class="search" type="search" placeholder="名前・会社・電話・メールで検索">
+  <div id="list" class="list"></div>
+</section>
+
+<!-- 詳細 -->
+<section id="v-detail" hidden>
+  <header><a class="btn ghost" href="#">← 一覧</a><span style="flex:1"></span><a class="btn" id="d-edit" href="#">編集</a></header>
+  <div class="sec">
+    <div class="tabs" id="d-tabs"></div>
+    <img id="d-img" class="d-img" alt="名刺の写真">
+    <div><p class="d-name" id="d-name"></p><p class="d-sub" id="d-sub"></p></div>
+  </div>
+  <div class="sec"><span class="label">タップで開く</span><div class="acts" id="d-acts"></div></div>
+  <div class="sec" id="d-note-sec"><span class="label">メモ</span><div id="d-note" style="white-space:pre-wrap"></div></div>
+  <div class="row"><button id="d-del" class="danger">この名刺を削除</button></div>
+</section>
+
+<!-- 追加・編集 -->
+<section id="v-edit" hidden>
+  <header><a class="btn ghost" href="#" id="e-cancel">← やめる</a><h1 id="e-title" style="font-size:18px">名刺を追加</h1></header>
+  <div class="sec">
+    <span class="label">写真（表は必須・裏は任意）</span>
+    <div class="shots">
+      <div class="col"><label class="shot" id="s-front"><strong>表を撮る</strong>タップでカメラ<input type="file" id="f-front" accept="image/*" capture="environment" hidden></label><div class="ctl" id="c-front"></div></div>
+      <div class="col"><label class="shot" id="s-back"><strong>裏を撮る</strong>任意<input type="file" id="f-back" accept="image/*" capture="environment" hidden></label><div class="ctl" id="c-back"></div></div>
+    </div>
+    <div id="prog" class="prog" hidden><span id="prog-t">準備中</span><div class="bar"><i id="prog-b"></i></div></div>
+    <p class="hint">明るい場所で、名刺が画面いっぱいになるように撮ると読み取りが正確になります。縦書き・横書きは自動で判定します。うまく読めないときは「横書き」「縦書き」を選び直すか、写真が横倒しなら「回転」を押してください。</p>
+  </div>
+  <div class="sec">
+    <div><label class="label" for="e-name">名前</label><input type="text" id="e-name" placeholder="山田 太郎"></div>
+    <div><label class="label" for="e-company">会社名</label><input type="text" id="e-company"></div>
+    <div><label class="label" for="e-role">部署・役職</label><input type="text" id="e-role"></div>
+    <div><label class="label" for="e-addr">住所</label><input type="text" id="e-addr"></div>
+    <div><label class="label" for="e-phones">電話番号（1行に1つ）</label><textarea id="e-phones" placeholder="TEL 03-1234-5678&#10;携帯 090-1234-5678"></textarea></div>
+    <div><label class="label" for="e-emails">メールアドレス（1行に1つ）</label><textarea id="e-emails"></textarea></div>
+    <div><label class="label" for="e-urls">Webサイト（1行に1つ）</label><textarea id="e-urls"></textarea></div>
+    <div><label class="label" for="e-note">メモ</label><textarea id="e-note" style="font-family:var(--f-body)" placeholder="会った日・場所など"></textarea></div>
+    <p class="hint">名前・役職・住所は文字の大きさや書き方から推測して入れています。間違っていたらここで直してください。</p>
+    <details><summary>読み取った全文を見る</summary><pre id="e-raw">（まだありません）</pre></details>
+  </div>
+  <div class="row"><button class="primary" id="e-save">保存する</button></div>
+</section>
+
+<!-- メニュー -->
+<section id="v-menu" hidden>
+  <header><a class="btn ghost" href="#">← 一覧</a><h1 style="font-size:18px">保存・書き出し</h1></header>
+  <div class="sec">
+    <b>バックアップ</b>
+    <p class="hint" style="margin:0">データはこのスマホのブラウザ内だけに保存されています。機種変更やブラウザのデータ削除で消えるので、ときどきバックアップを保存してください。</p>
+    <div class="row"><button id="m-backup">バックアップを保存（写真込み）</button></div>
+    <div class="row"><label class="btn">バックアップから復元<input type="file" id="m-restore" accept="application/json,.json" hidden></label></div>
+  </div>
+  <div class="sec">
+    <b>CSVで書き出し</b>
+    <p class="hint" style="margin:0">Excelやスプレッドシートで開ける形式です（写真は含まれません）。</p>
+    <div class="row"><button id="m-csv">CSVを書き出す</button></div>
+  </div>
+</section>
+
+</div>
+<button class="fab primary" id="fab" aria-label="名刺を追加">＋</button>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let DB, cards=[];
+
+/* ---------- 保存（IndexedDB） ---------- */
+function openDB(){return new Promise((res,rej)=>{const r=indexedDB.open('meishi',1);
+  r.onupgradeneeded=()=>r.result.createObjectStore('cards',{keyPath:'id'});
+  r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
+const store=m=>DB.transaction('cards',m).objectStore('cards');
+const req=r=>new Promise((res,rej)=>{r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});
+const dbAll=()=>req(store('readonly').getAll());
+const dbPut=c=>req(store('readwrite').put(c));
+const dbDel=id=>req(store('readwrite').delete(id));
+
+function toast(msg){const t=$('#toast');t.textContent=msg;t.hidden=false;clearTimeout(t._t);t._t=setTimeout(()=>t.hidden=true,2000);}
+async function copy(text){try{await navigator.clipboard.writeText(text);toast('コピーしました');}catch(e){toast('コピーできませんでした');}}
+
+/* ---------- 文字の抜き出し ---------- */
+function normalize(t){
+  return t.normalize('NFKC').replace(/[\u30fc\u2010\u2011\u2013\u2014\u2015\u2212]/g,'-')
+    .replace(/([\u3040-\u30ff\u3400-\u9fff])[ \t]+(?=[\u3040-\u30ff\u3400-\u9fff])/g,'$1');
+}
+function extract(raw){
+  const text=normalize(raw), out={emails:[],phones:[],urls:[],company:''};
+  for(const line of text.split(/\n/)){
+    const tight=line.replace(/\s+/g,'').replace(/^(e-?mail|mail|メール|url|hp|web|ホームページ)[:：]?/i,'').replace(/(e-?mail|mail|url|hp|web)[:：]/gi,' ');
+    // メール
+    const em=tight.match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}/g)||[];
+    em.forEach(e=>out.emails.push(e.replace(/^[^A-Za-z0-9]+/,'').toLowerCase()));
+    // URL（メール部分は除く）
+    let rest=tight; em.forEach(e=>rest=rest.split(e).join(' '));
+    const ur=rest.match(/(?:https?:\/\/[A-Za-z0-9.\-]+\.[A-Za-z]{2,}[A-Za-z0-9.\/_~%?#=&\-]*|www\.[A-Za-z0-9.\-]+\.[A-Za-z]{2,}[A-Za-z0-9.\/_~%?#=&\-]*|[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.(?:co\.jp|or\.jp|ne\.jp|ac\.jp|go\.jp|jp|com|net|org|io|biz|info|co)(?![A-Za-z])[\/A-Za-z0-9._~%?#=&\-]*)/gi)||[];
+    ur.forEach(u=>{u=u.replace(/[.\-\/]+$/,'');if(!/^https?:/i.test(u))u='https://'+u;out.urls.push(u);});
+    // 電話・FAX
+    let prev=0;
+    for(const mt of line.matchAll(/(?:\+81[\s\-()]*\d{1,4}|0\d{1,4})[\s\-()]*\d{1,4}[\s\-()]*\d{3,4}/g)){
+      const p=mt[0], before=line.slice(prev,mt.index); prev=mt.index+p.length;
+      const d=p.replace(/[^\d+]/g,''), n=d.replace('+81','0').length;
+      if(n<10||n>11)continue;
+      let label='TEL';
+      if(/fax|ファクス|ファックス|(^|[^a-z])f[.:\s]*$/i.test(before))label='FAX';
+      else if(/携帯|mobile|cell|(^|[^a-z])m[.:\s]*$/i.test(before)||/^0[789]0/.test(d))label='携帯';
+      out.phones.push({label,num:p.trim().replace(/\s+/g,'-').replace(/-+/g,'-')});
+    }
+    // 会社名
+    if(!out.company&&/(株式会社|有限会社|合同会社|一般社団法人|\(株\)|Inc\.?|Co\.,|Corporation|Ltd\.?|LLC)/i.test(line))
+      out.company=line.trim().replace(/\s{2,}/g,' ');
+  }
+  return out;
+}
+const RE_CO=/(株式会社|有限会社|合同会社|合資会社|一般社団法人|一般財団法人|公益|医療法人|学校法人|社会福祉法人|NPO法人|\(株\)|\(有\)|Inc\.?|Co\.,|Corporation|Ltd\.?|LLC|事務所|クリニック|病院|大学)/i;
+const RE_ROLE=/(代表|取締役|社長|会長|執行役員|役員|理事|部長|次長|課長|係長|主任|室長|所長|支店長|店長|局長|グループ|チーム|リーダー|マネージャー|マネジャー|ディレクター|プロデューサー|エンジニア|デザイナー|コンサルタント|担当|部$|課$|室$|部\s|課\s|本部|事業部|営業|総務|経理|人事|企画|開発|技術|広報|CEO|CTO|COO|CFO|President|Director|Manager|Engineer|Designer|Sales|Officer|Head)/i;
+const RE_ADDR=/(〒|\d{3}-\d{4}|東京都|北海道|京都府|大阪府|[^\s]{2,3}県|[^\s]{1,6}[市区町村郡]\S*\d|丁目|番地|ビル\s*\d*F?)/;
+function guess(ocrLines,raw){
+  const out={name:'',role:'',addr:''};
+  const L=(ocrLines.length?ocrLines:normalize(raw).split('\n').map(t=>({text:t,size:0})))
+    .map(l=>({t:normalize(l.text).replace(/\s{2,}/g,' ').trim(),size:l.size})).filter(l=>l.t);
+  // 住所：〒・都道府県・丁目などを含む行（電話番号は取り除く）
+  const addr=L.filter(l=>RE_ADDR.test(l.t)&&!/@|www\.|https?:/i.test(l.t))
+    .map(l=>l.t.replace(/(TEL|FAX|Tel|Fax|電話|携帯)[\s.:]*[\d\-+() ]{9,}/g,'').replace(/(?:\+81|0)\d{1,4}-\d{1,4}-\d{3,4}/g,'').trim()).filter(Boolean);
+  out.addr=[...new Set(addr)].slice(0,2).join(' ');
+  // 「代表取締役 佐藤花子」のように役職と名前が同じ行にある場合は分ける
+  const JA=/^[\u3400-\u9fff々〆ヶ\u3040-\u30ff]{1,5}\s?[\u3400-\u9fff々〆ヶ\u3040-\u30ff]{1,5}$/;
+  for(const l of L){const m=l.t.match(/^(.*(?:社長|会長|取締役|役員|理事|部長|次長|課長|係長|主任|室長|所長|支店長|店長|局長|リーダー|マネージャー|マネジャー|ディレクター|担当|CEO|CTO|COO|CFO))\s*([^\s].{1,10})$/);
+    if(m&&JA.test(m[2].trim())&&!RE_ROLE.test(m[2])){L.push({t:m[2].trim(),size:l.size*1.3});l.t=m[1].trim();}}
+  // 役職・部署
+  const roles=L.filter(l=>RE_ROLE.test(l.t)&&!RE_CO.test(l.t)&&!RE_ADDR.test(l.t)&&!/@|\d{3,}/.test(l.t)&&l.t.length<=30);
+  out.role=[...new Set(roles.map(l=>l.t))].slice(0,2).join(' ');
+  // 名前：会社・役職・住所・連絡先でない短い行のうち、いちばん大きな文字
+  const cands=[];
+  for(const l of L){
+    let t=l.t;
+    if(RE_CO.test(t)||RE_ADDR.test(t)||/[@\d]|www|https?|\.(com|jp)/i.test(t))continue;
+    if(RE_ROLE.test(t))continue;
+    const ja=JA.test(t);
+    const en=/^[A-Z][A-Za-z'\-]+(\s[A-Z][A-Za-z'\-.]+){1,2}$/.test(t)&&!/^[A-Z\s]+$/.test(t.replace(/\s/g,'').slice(1))||/^[A-Z][a-z]+\s[A-Z]{2,}$/.test(t);
+    if(!ja&&!en)continue;
+    const kana=/^[\u3040-\u30ff\s]+$/.test(t); // ふりがな行は優先度を下げる
+    const len=t.replace(/\s/g,'').length;
+    cands.push({t,score:l.size*(ja?1.2:1)*(kana?0.5:1)*(len>=2&&len<=5?1.1:1)});
+  }
+  cands.sort((a,b)=>b.score-a.score);
+  if(cands[0])out.name=cands[0].t;
+  return out;
+}
+const phoneToLine=p=>`${p.label} ${p.num}`;
+function parsePhones(t){return t.split('\n').map(l=>l.trim()).filter(Boolean).map(l=>{
+  const m=l.match(/^(.*?)\s*(\+?[\d][\d\-\s()]{7,})$/);
+  return m?{label:m[1].trim()||'TEL',num:m[2].trim()}:{label:'TEL',num:l};});}
+const lines=t=>t.split('\n').map(l=>l.trim()).filter(Boolean);
+const telHref=n=>'tel:'+n.replace(/[^\d+]/g,'');
+
+/* ---------- 画像 ---------- */
+function fit(src,max){const s=Math.min(1,max/Math.max(src.width,src.height)),c=document.createElement('canvas');
+  c.width=Math.round(src.width*s);c.height=Math.round(src.height*s);c.getContext('2d').drawImage(src,0,0,c.width,c.height);return c;}
+function imgFrom(url){return new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=()=>rej(new Error('画像を開けませんでした'));i.src=url;});}
+async function loadImage(file){const url=URL.createObjectURL(file);try{return fit(await imgFrom(url),1800);}finally{URL.revokeObjectURL(url);}}
+function rotate(c,deg){const r=document.createElement('canvas'),q=Math.abs(deg)===90;r.width=q?c.height:c.width;r.height=q?c.width:c.height;
+  const x=r.getContext('2d');x.translate(r.width/2,r.height/2);x.rotate(deg*Math.PI/180);x.drawImage(c,-c.width/2,-c.height/2);return r;}
+const toStored=c=>fit(c,1200).toDataURL('image/jpeg',0.78);
+async function canvasFor(side){if(!draft.canvas[side]&&draft[side])draft.canvas[side]=fit(await imgFrom(draft[side]),1800);return draft.canvas[side];}
+
+/* ---------- OCR（横書き・縦書き） ---------- */
+const workers={};let ocrQueue=Promise.resolve(),phase='';
+function setProg(p,t){$('#prog').hidden=false;$('#prog-t').textContent=t;$('#prog-b').style.width=Math.round((p||0)*100)+'%';}
+function getWorker(kind){
+  if(!workers[kind]){
+    workers[kind]=(async()=>{
+      const w=await Tesseract.createWorker(kind==='v'?['jpn_vert']:['jpn','eng'],1,{logger:m=>{
+        if(m.status==='recognizing text')setProg(m.progress,phase);
+        else if(m.status)setProg(m.progress,(kind==='v'?'縦書き':'横書き')+'の読み取り準備中…（初回は少し時間がかかります）');}});
+      if(kind==='v')await w.setParameters({tessedit_pageseg_mode:'5'}); // 縦書きの1ブロック
+      return w;})();
+    workers[kind].catch(()=>{delete workers[kind];});
+  }
+  return workers[kind];
+}
+async function rec(kind,canvas,label){phase=label;const w=await getWorker(kind);const {data}=await w.recognize(canvas);
+  // 行ごとの文字の大きさ（横書きは高さ、縦書きは幅）
+  const ls=(data.lines||[]).filter(l=>l.confidence>30&&l.text.trim()).map(l=>({text:l.text.trim(),
+    size:kind==='v'?l.bbox.x1-l.bbox.x0:l.bbox.y1-l.bbox.y0}));
+  return {text:data.text||'',conf:data.confidence||0,lines:ls};}
+// 縦書き名刺：日本語は縦書きで読み、横倒しで書かれたメール・URL・番号は回転させて読む
+async function readVertical(canvas,name){
+  const v=await rec('v',canvas,name+'を縦書きとして読み取り中…');
+  const h=await rec('h',rotate(canvas,-90),name+'の英数字を読み取り中…');
+  const extra=h.text.split('\n').filter(l=>/@|\d{2,}|www|\.(com|jp|net|org)/i.test(l)).join('\n');
+  return {text:v.text+(extra?'\n'+extra:''),conf:v.conf,lines:v.lines};
+}
+function ocr(side){
+  const name=side==='front'?'表':'裏',mode=draft.mode[side],d=draft;
+  ocrQueue=ocrQueue.then(async()=>{
+    try{
+      const canvas=await canvasFor(side);if(!canvas)return;
+      let res,used=mode;
+      if(mode==='h')res=await rec('h',canvas,name+'を横書きとして読み取り中…');
+      else if(mode==='v')res=await readVertical(canvas,name);
+      else{
+        const h=await rec('h',canvas,name+'を読み取り中…');
+        const portrait=canvas.height>canvas.width*1.1;
+        if(h.conf>=75&&!portrait){res=h;used='h';}
+        else{const v=await readVertical(canvas,name);if(v.conf>h.conf+5){res=v;used='v';}else{res=h;used='h';}}
+      }
+      if(d!==draft)return; // 途中で画面を閉じた
+      draft.raw[side]=res.text;draft.lines[side]=res.lines;draft.used[side]=used;
+      applyExtract();renderShots();
+      setProg(1,`${name}を${used==='v'?'縦書き':'横書き'}として読み取りました。うまく読めていなければ向きを切り替えてください。`);
+    }catch(e){
+      setProg(0,'読み取れませんでした。通信状態を確認するか、手で入力してください。');
+    }
+  });
+}
+function applyExtract(){
+  const r=extract([draft.raw.front,draft.raw.back].filter(Boolean).join('\n'));
+  const prev=draft.auto||{phones:[],emails:[],urls:[],company:''};
+  const key=s=>s.replace(/\s/g,'').toLowerCase();
+  // 前回の自動入力で、手直しされていない行だけ入れ替える
+  const merge=(el,oldItems,newItems,k=key)=>{const old=new Set(oldItems.map(k));
+    const cur=lines(el.value).filter(l=>!old.has(k(l))),have=new Set(cur.map(k));
+    newItems.forEach(i=>{if(!have.has(k(i))){have.add(k(i));cur.push(i);}});el.value=cur.join('\n');};
+  const newPh=r.phones.map(phoneToLine);
+  merge($('#e-phones'),prev.phones,newPh,s=>s.replace(/\D/g,''));
+  merge($('#e-emails'),prev.emails,r.emails);
+  merge($('#e-urls'),prev.urls,r.urls);
+  const g=guess([...(draft.lines.front||[]),...(draft.lines.back||[])],[draft.raw.front,draft.raw.back].filter(Boolean).join('\n'));
+  const setF=(id,old,val)=>{const el=$(id);if(!el.value||el.value===old)el.value=val||'';};
+  setF('#e-company',prev.company,r.company);setF('#e-name',prev.name,g.name);
+  setF('#e-role',prev.role,g.role);setF('#e-addr',prev.addr,g.addr);
+  draft.auto={phones:newPh,emails:r.emails,urls:r.urls,company:r.company,name:g.name,role:g.role,addr:g.addr};
+  $('#e-raw').textContent=[draft.raw.front&&'【表】\n'+draft.raw.front,draft.raw.back&&'【裏】\n'+draft.raw.back].filter(Boolean).join('\n\n')||'（まだありません）';
+}
+
+/* ---------- 編集画面 ---------- */
+let draft=null;
+function shotHTML(side){const img=draft[side];
+  return img?`<img src="${img}" alt=""><button type="button" class="x" data-clear="${side}">撮り直す</button>`
+    :`<strong>${side==='front'?'表を撮る':'裏を撮る'}</strong>${side==='front'?'タップでカメラ':'任意'}`;}
+function renderShots(){for(const side of ['front','back']){const el=$('#s-'+side),inp=$('#f-'+side),c=$('#c-'+side);
+  el.innerHTML=shotHTML(side);el.appendChild(inp);
+  if(!draft[side]){c.innerHTML='';continue;}
+  const m=draft.mode[side],u=draft.used[side];
+  c.innerHTML=`<div class="seg" role="group" aria-label="文字の向き">${[['auto','自動'],['h','横書き'],['v','縦書き']]
+    .map(([k,l])=>`<button type="button" data-mode="${side}:${k}" aria-pressed="${m===k}">${l}</button>`).join('')}</div>
+    <div class="ctl-row"><button type="button" data-rot="${side}" aria-label="写真を右に90度回転">↻ 回転</button><span>${m==='auto'&&u?(u==='v'?'縦書きと判定':'横書きと判定'):''}</span></div>`;}}
+function openEditor(card){
+  if(!draft||draft.id!==(card?card.id:'new')){
+    draft={id:card?card.id:'new',front:card?.front||'',back:card?.back||'',raw:{front:card?.rawFront||'',back:card?.rawBack||''},lines:{},
+      canvas:{},mode:{front:'auto',back:'auto'},used:{},auto:null};
+    $('#e-name').value=card?.name||'';$('#e-company').value=card?.company||'';$('#e-role').value=card?.role||'';$('#e-addr').value=card?.addr||'';
+    $('#e-phones').value=(card?.phones||[]).map(phoneToLine).join('\n');
+    $('#e-emails').value=(card?.emails||[]).join('\n');$('#e-urls').value=(card?.urls||[]).join('\n');
+    $('#e-note').value=card?.note||'';
+    $('#e-raw').textContent=[draft.raw.front,draft.raw.back].filter(Boolean).join('\n\n')||'（まだありません）';
+    $('#prog').hidden=true;
+  }
+  $('#e-title').textContent=card?'名刺を編集':'名刺を追加';
+  $('#e-cancel').href=card?'#c-'+card.id:'#';
+  renderShots();show('v-edit');
+}
+for(const side of ['front','back']){
+  $('#f-'+side).addEventListener('change',async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;
+    try{const canvas=await loadImage(f);draft.canvas[side]=canvas;draft[side]=toStored(canvas);draft.raw[side]='';draft.used[side]='';
+      renderShots();ocr(side);}
+    catch(err){toast(err.message);}});
+}
+document.addEventListener('click',async e=>{
+  const clr=e.target.closest('[data-clear]'),rot=e.target.closest('[data-rot]'),md=e.target.closest('[data-mode]');
+  if(clr){e.preventDefault();e.stopPropagation();const side=clr.dataset.clear;
+    draft[side]='';draft.canvas[side]=null;draft.raw[side]='';draft.used[side]='';applyExtract();renderShots();$('#f-'+side).click();}
+  else if(rot){const side=rot.dataset.rot;try{const c=rotate(await canvasFor(side),90);
+    draft.canvas[side]=c;draft[side]=toStored(c);renderShots();ocr(side);}catch(err){toast(err.message);}}
+  else if(md){const [side,m]=md.dataset.mode.split(':');draft.mode[side]=m;renderShots();ocr(side);}
+});
+$('#e-save').addEventListener('click',async()=>{
+  const old=cards.find(c=>c.id===draft.id);
+  const card={id:old?old.id:(Date.now().toString(36)+Math.random().toString(36).slice(2,6)),created:old?.created||Date.now(),
+    updated:Date.now(),name:$('#e-name').value.trim(),company:$('#e-company').value.trim(),role:$('#e-role').value.trim(),addr:$('#e-addr').value.trim(),
+    phones:parsePhones($('#e-phones').value),emails:lines($('#e-emails').value),
+    urls:lines($('#e-urls').value).map(u=>/^https?:/i.test(u)?u:'https://'+u),
+    note:$('#e-note').value.trim(),front:draft.front,back:draft.back,rawFront:draft.raw.front,rawBack:draft.raw.back};
+  if(!card.front&&!card.name&&!card.company&&!card.phones.length&&!card.emails.length){toast('写真を撮るか、名前などを入力してください');return;}
+  try{await dbPut(card);}catch(e){toast('保存できませんでした（空き容量を確認してください）');return;}
+  cards=cards.filter(c=>c.id!==card.id);cards.unshift(card);draft=null;toast('保存しました');location.hash='c-'+card.id;
+});
+
+/* ---------- 一覧 ---------- */
+function chipsHTML(c){
+  const a=[];
+  c.phones.filter(p=>p.label!=='FAX').slice(0,2).forEach(p=>a.push(`<a class="chip" href="${telHref(p.num)}">☎ ${esc(p.label==='携帯'?'携帯':'電話')}</a>`));
+  c.emails.slice(0,1).forEach(m=>a.push(`<a class="chip" href="mailto:${esc(m)}">✉ メール</a>`));
+  c.urls.slice(0,1).forEach(u=>a.push(`<a class="chip" href="${esc(u)}" target="_blank" rel="noopener">↗ サイト</a>`));
+  return a.join('');
+}
+function renderList(){
+  const q=$('#q').value.trim().toLowerCase();
+  const hit=c=>!q||[c.name,c.company,c.role,c.addr,c.note,c.rawFront,c.rawBack,...c.emails,...c.urls,...c.phones.map(p=>p.num+p.num.replace(/\D/g,''))]
+    .join(' ').toLowerCase().includes(q);
+  const shown=cards.filter(hit);
+  $('#count').textContent=cards.length?cards.length+'枚':'';
+  if(!cards.length){$('#list').innerHTML=`<div class="empty"><b>まだ名刺がありません</b>右下の「＋」から名刺の表（と裏）を撮影すると、<br>電話番号・メール・Webサイトを読み取ってタップで開けるようにします。</div>`;return;}
+  if(!shown.length){$('#list').innerHTML=`<div class="empty">「${esc(q)}」に一致する名刺はありません</div>`;return;}
+  $('#list').innerHTML=shown.map(c=>`<div class="item" data-id="${c.id}">
+    ${c.front?`<img class="thumb" src="${c.front}" alt="">`:`<div class="thumb"></div>`}
+    <div class="meta"><b>${esc(c.name||c.company||'名前未入力')}</b><span>${esc(c.name?c.company:'')}</span><span>${esc(c.role)}</span></div>
+    ${chipsHTML(c)?`<div class="chips">${chipsHTML(c)}</div>`:''}</div>`).join('');
+}
+$('#q').addEventListener('input',renderList);
+$('#list').addEventListener('click',e=>{if(e.target.closest('a'))return;const it=e.target.closest('.item');if(it)location.hash='c-'+it.dataset.id;});
+
+/* ---------- 詳細 ---------- */
+function showDetail(c){
+  $('#d-edit').href='#edit-'+c.id;
+  const sides=[['front','表'],['back','裏']].filter(([s])=>c[s]);
+  const setSide=s=>{$('#d-img').src=c[s];$('#d-tabs').querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.s===s));};
+  $('#d-tabs').innerHTML=sides.length>1?sides.map(([s,l])=>`<button type="button" data-s="${s}">${l}</button>`).join(''):'';
+  $('#d-tabs').onclick=e=>{const b=e.target.closest('button');if(b)setSide(b.dataset.s);};
+  $('#d-img').hidden=!sides.length; if(sides.length)setSide(sides[0][0]);
+  $('#d-name').textContent=c.name||c.company||'名前未入力';
+  $('#d-sub').textContent=[c.name?c.company:'',c.role].filter(Boolean).join('　');
+  const acts=[];
+  c.phones.forEach(p=>acts.push({tag:p.label,href:p.label==='FAX'?'':telHref(p.num),text:p.num}));
+  c.emails.forEach(m=>acts.push({tag:'メール',href:'mailto:'+m,text:m}));
+  if(c.addr)acts.push({tag:'住所',href:'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(c.addr),text:c.addr,blank:true});
+  c.urls.forEach(u=>acts.push({tag:'Web',href:u,text:u.replace(/^https?:\/\//,''),blank:true}));
+  $('#d-acts').innerHTML=acts.length?acts.map((a,i)=>`<div class="act"><span class="tag">${esc(a.tag)}</span>
+    ${a.href?`<a href="${esc(a.href)}"${a.blank?' target="_blank" rel="noopener"':''}>${esc(a.text)}</a>`:`<span style="font-family:var(--f-mono);padding:8px 0">${esc(a.text)}</span>`}
+    <button type="button" data-copy="${i}">コピー</button></div>`).join('')
+    :'<p class="hint" style="margin:0">電話番号・メール・Webサイトがまだありません。「編集」から追加できます。</p>';
+  $('#d-acts').onclick=e=>{const b=e.target.closest('[data-copy]');if(b)copy(acts[+b.dataset.copy].text);};
+  $('#d-note-sec').hidden=!c.note;$('#d-note').textContent=c.note;
+  const del=$('#d-del');del.textContent='この名刺を削除';del.dataset.arm='';
+  del.onclick=async()=>{if(!del.dataset.arm){del.dataset.arm='1';del.textContent='もう一度押すと削除します';return;}
+    await dbDel(c.id);cards=cards.filter(x=>x.id!==c.id);toast('削除しました');location.hash='';};
+  show('v-detail');
+}
+
+/* ---------- バックアップ・CSV ---------- */
+function download(name,blob){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;
+  document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1000);}
+const stamp=()=>new Date().toISOString().slice(0,10);
+$('#m-backup').onclick=()=>download(`名刺帳バックアップ_${stamp()}.json`,new Blob([JSON.stringify({app:'meishi',v:1,cards})],{type:'application/json'}));
+$('#m-csv').onclick=()=>{
+  const q=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
+  const rows=[['名前','会社名','部署・役職','住所','電話','メール','Webサイト','メモ','登録日']]
+    .concat(cards.map(c=>[c.name,c.company,c.role,c.addr,c.phones.map(phoneToLine).join(' / '),c.emails.join(' / '),c.urls.join(' / '),c.note,new Date(c.created).toLocaleDateString('ja-JP')]));
+  download(`名刺帳_${stamp()}.csv`,new Blob(['\ufeff'+rows.map(r=>r.map(q).join(',')).join('\r\n')],{type:'text/csv'}));
+};
+$('#m-restore').addEventListener('change',async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;
+  try{const data=JSON.parse(await f.text());if(!Array.isArray(data.cards))throw 0;
+    for(const c of data.cards)await dbPut(c);cards=(await dbAll()).sort((a,b)=>b.created-a.created);
+    toast(data.cards.length+'枚を復元しました');location.hash='';}
+  catch(err){toast('このファイルは名刺帳のバックアップではないようです');}});
+
+/* ---------- 画面切り替え ---------- */
+function show(id){for(const v of ['v-list','v-detail','v-edit','v-menu'])$('#'+v).hidden=v!==id;
+  $('#fab').hidden=id!=='v-list';window.scrollTo(0,0);}
+function route(){
+  const h=decodeURIComponent(location.hash.slice(1));
+  if(h==='new')return openEditor(null);
+  if(h==='menu')return show('v-menu');
+  if(h.startsWith('edit-')){const c=cards.find(x=>x.id===h.slice(5));if(c)return openEditor(c);}
+  if(h.startsWith('c-')){const c=cards.find(x=>x.id===h.slice(2));if(c)return showDetail(c);}
+  draft=null;renderList();show('v-list');
+}
+$('#fab').onclick=()=>{draft=null;location.hash='new';};
+window.addEventListener('hashchange',route);
+
+(async()=>{
+  try{DB=await openDB();cards=(await dbAll()).sort((a,b)=>b.created-a.created);}
+  catch(e){toast('このブラウザでは保存機能が使えません（プライベートモードを解除してください）');}
+  route();
+})();
+</script>
+</body>
+</html>
