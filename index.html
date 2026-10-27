@@ -196,17 +196,19 @@ function normalize(t){
   return t.normalize('NFKC').replace(/[\u30fc\u2010\u2011\u2013\u2014\u2015\u2212]/g,'-')
     .replace(/([\u3040-\u30ff\u3400-\u9fff])[ \t]+(?=[\u3040-\u30ff\u3400-\u9fff])/g,'$1');
 }
+// 「sample.cojp」のようにドットが抜けた日本のドメインを直す
+const fixJp=s=>s.replace(/\.?(co|or|ne|ac|go|ed|lg)\.?jp(?=$|\/)/i,'.$1.jp');
 function extract(raw){
   const text=normalize(raw), out={emails:[],phones:[],urls:[],company:''};
   for(const line of text.split(/\n/)){
     const tight=line.replace(/\s+/g,'').replace(/^(e-?mail|mail|メール|url|hp|web|ホームページ)[:：]?/i,'').replace(/(e-?mail|mail|url|hp|web)[:：]/gi,' ');
     // メール
     const em=tight.match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}/g)||[];
-    em.forEach(e=>out.emails.push(e.replace(/^[^A-Za-z0-9]+/,'').toLowerCase()));
+    em.forEach(e=>out.emails.push(fixJp(e.replace(/^[^A-Za-z0-9]+/,'').toLowerCase())));
     // URL（メール部分は除く）
     let rest=tight; em.forEach(e=>rest=rest.split(e).join(' '));
     const ur=rest.match(/(?:https?:\/\/[A-Za-z0-9.\-]+\.[A-Za-z]{2,}[A-Za-z0-9.\/_~%?#=&\-]*|www\.[A-Za-z0-9.\-]+\.[A-Za-z]{2,}[A-Za-z0-9.\/_~%?#=&\-]*|[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.(?:co\.jp|or\.jp|ne\.jp|ac\.jp|go\.jp|jp|com|net|org|io|biz|info|co)(?![A-Za-z])[\/A-Za-z0-9._~%?#=&\-]*)/gi)||[];
-    ur.forEach(u=>{u=u.replace(/[.\-\/]+$/,'');if(!/^https?:/i.test(u))u='https://'+u;out.urls.push(u);});
+    ur.forEach(u=>{u=fixJp(u.replace(/[.\-\/]+$/,''));if(!/^https?:/i.test(u))u='https://'+u;out.urls.push(u);});
     // 電話・FAX
     let prev=0;
     for(const mt of line.matchAll(/(?:\+81[\s\-()]*\d{1,4}|0\d{1,4})[\s\-()]*\d{1,4}[\s\-()]*\d{3,4}/g)){
@@ -285,7 +287,7 @@ function getWorker(kind){
       const w=await Tesseract.createWorker(kind==='v'?['jpn_vert']:['jpn','eng'],1,{logger:m=>{
         if(m.status==='recognizing text')setProg(m.progress,phase);
         else if(m.status)setProg(m.progress,(kind==='v'?'縦書き':'横書き')+'の読み取り準備中…（初回は少し時間がかかります）');}});
-      if(kind==='v')await w.setParameters({tessedit_pageseg_mode:'5'}); // 縦書きの1ブロック
+      await w.setParameters({tessedit_pageseg_mode:kind==='v'?'5':'11'}); // 縦書きは1ブロック、横書きは散らばった文字（大きい名前も拾う）
       return w;})();
     workers[kind].catch(()=>{delete workers[kind];});
   }
