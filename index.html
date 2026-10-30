@@ -40,7 +40,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible{
 .primary{background:var(--accent);border-color:var(--accent);color:var(--paper);font-weight:700}
 .ghost{border-color:transparent;background:transparent;color:var(--muted)}
 .danger{color:var(--danger)}
-input[type=search],input[type=text],textarea{width:100%;font:inherit;color:var(--ink);background:var(--card);
+input[type=search],input[type=text],input[type=password],textarea{width:100%;font:inherit;color:var(--ink);background:var(--card);
   border:1px solid var(--line);border-radius:10px;padding:10px 12px}
 textarea{resize:vertical;min-height:70px;font-family:var(--f-mono);font-size:14px}
 .search{margin-bottom:14px}
@@ -75,7 +75,7 @@ textarea{resize:vertical;min-height:70px;font-family:var(--f-mono);font-size:14p
 .seg button:last-child{border-radius:0 8px 8px 0}
 .seg button[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--paper);font-weight:700;position:relative}
 .ctl-row{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
-.ctl-row button{padding:5px 10px;font-size:12px}
+.ctl-row button{padding:5px 10px;font-size:12px;white-space:nowrap;flex:none}
 .prog{font-size:13px;color:var(--muted)}
 .bar{height:6px;border-radius:3px;background:var(--accent-soft);overflow:hidden;margin-top:4px}
 .bar i{display:block;height:100%;background:var(--accent);width:0;transition:width .2s}
@@ -110,6 +110,9 @@ pre{white-space:pre-wrap;font-family:var(--f-mono);font-size:12px;color:var(--mu
 .mlist button span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .mlist button small{color:var(--muted);flex:none}
 .mlist button[data-arm="1"]{border-color:var(--accent);color:var(--accent);font-weight:700}
+.gstat{font-size:13px;margin:0;padding:8px 10px;border-radius:8px;background:var(--paper)}
+.gstat[data-ok="1"]{color:var(--accent);font-weight:700}
+.gstat[data-ok="0"]{color:var(--danger)}
 .dup{border-color:var(--accent);background:var(--accent-soft)}
 @media (prefers-reduced-motion:reduce){.bar i{transition:none}}
 </style>
@@ -180,6 +183,14 @@ pre{white-space:pre-wrap;font-family:var(--f-mono);font-size:12px;color:var(--mu
     <p class="hint" style="margin:0">データはこのスマホのブラウザ内だけに保存されています。機種変更やブラウザのデータ削除で消えるので、ときどきバックアップを保存してください。</p>
     <div class="row"><button id="m-backup">バックアップを保存（写真込み）</button></div>
     <div class="row"><label class="btn">バックアップから復元<input type="file" id="m-restore" accept="application/json,.json" hidden></label></div>
+  </div>
+  <div class="sec" id="gcv">
+    <b>高精度の読み取り（Google Cloud Vision）</b>
+    <p class="hint" style="margin:0">APIキーを入れると、名刺の写真をGoogleに送って読み取ります。黒い名刺や色付き・デザイン性の高い名刺も読めるようになります。キーはこのスマホの中だけに保存され、バックアップにも含まれません。キーを削除すると、スマホ内の無料の読み取りに戻ります。</p>
+    <p class="gstat" id="g-status"></p>
+    <div><label class="label" for="g-key">APIキー</label><input type="password" id="g-key" placeholder="AIza で始まるAPIキーを貼り付け" autocomplete="off" spellcheck="false" autocapitalize="off"></div>
+    <div class="row"><button class="primary" id="g-save">保存して確認</button><button id="g-clear">キーを削除</button></div>
+    <p class="hint" style="margin:0">毎月1,000枚（表と裏は別々に数えます）までは無料です。それを超えると1,000枚あたり約1.5ドルかかります。</p>
   </div>
   <div class="sec">
     <b>CSVで書き出し</b>
@@ -333,6 +344,52 @@ async function rec(kind,canvas,label){phase=label;const w=await getWorker(kind);
   const ls=(data.lines||[]).filter(l=>l.confidence>30&&l.text.trim()).map(l=>({text:l.text.trim(),
     size:kind==='v'?l.bbox.x1-l.bbox.x0:l.bbox.y1-l.bbox.y0,box:l.bbox,v:kind==='v'}));
   return {text:data.text||'',conf:data.confidence||0,lines:ls};}
+/* ---------- Google Cloud Vision ---------- */
+const LS={get(k){try{return localStorage.getItem(k);}catch(e){return null;}},
+  set(k,v){try{v==null?localStorage.removeItem(k):localStorage.setItem(k,v);return true;}catch(e){return false;}}};
+const gKey=()=>LS.get('gcvKey')||'';
+const monthKey=()=>'gcvUse-'+new Date().toISOString().slice(0,7);
+const gUse=()=>+(LS.get(monthKey())||0);
+async function gcv(canvas,key){
+  const b64=fit(canvas,1600).toDataURL('image/jpeg',0.9).split(',')[1];
+  let r;
+  try{r=await fetch('https://vision.googleapis.com/v1/images:annotate?key='+encodeURIComponent(key),{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({requests:[{image:{content:b64},features:[{type:'DOCUMENT_TEXT_DETECTION'}],imageContext:{languageHints:['ja','en']}}]})});}
+  catch(e){const x=new Error('通信できませんでした');x.kind='net';throw x;}
+  const j=await r.json().catch(()=>({}));
+  const err=j.error||j.responses?.[0]?.error;
+  if(!r.ok||err){const x=new Error(err?.message||('HTTP '+r.status));x.kind=err?.status||String(r.status);throw x;}
+  LS.set(monthKey(),String(gUse()+1));
+  const fa=j.responses?.[0]?.fullTextAnnotation;
+  if(!fa)return {text:'',conf:0,lines:[]};
+  // 文字の位置から行を組み立てる（名前の推測に文字の大きさを使うため）
+  const out=[];
+  for(const pg of fa.pages||[])for(const bl of pg.blocks||[])for(const pa of bl.paragraphs||[]){
+    let t='',pts=[];
+    const flush=()=>{const tt=t.trim();
+      if(tt&&pts.length){const xs=pts.map(p=>p.x||0),ys=pts.map(p=>p.y||0);
+        const box={x0:Math.min(...xs),y0:Math.min(...ys),x1:Math.max(...xs),y1:Math.max(...ys)};
+        const w=box.x1-box.x0,h=box.y1-box.y0;
+        out.push({text:tt,size:Math.min(w,h),box,v:h>w&&tt.length>1});}
+      t='';pts=[];};
+    for(const wd of pa.words||[])for(const sy of wd.symbols||[]){
+      t+=sy.text||'';pts.push(...(sy.boundingBox?.vertices||[]));
+      const br=sy.property?.detectedBreak?.type;
+      if(br==='SPACE'||br==='SURE_SPACE')t+=' ';
+      else if(br==='EOL_SURE_SPACE'||br==='LINE_BREAK')flush();
+    }
+    flush();
+  }
+  return {text:fa.text||'',conf:95,lines:out};
+}
+function gErrText(e){
+  if(e.kind==='net')return '通信できなかったため';
+  if(e.kind==='RESOURCE_EXHAUSTED'||e.kind==='429')return 'Googleの読み取り回数の上限に達したため';
+  if(/API key|PERMISSION_DENIED|INVALID_ARGUMENT|403|400/i.test(e.kind+' '+e.message))return 'APIキーが使えない状態のため';
+  if(/billing/i.test(e.message))return 'Google Cloudの請求先アカウントが未設定のため';
+  return 'Googleで読み取れなかったため';
+}
 // 縦書き名刺：日本語は縦書きで読み、横倒しで書かれたメール・URL・番号は回転させて読む
 async function readVertical(canvas,name){
   const v=await rec('v',canvas,name+'を縦書きとして読み取り中…');
@@ -340,24 +397,33 @@ async function readVertical(canvas,name){
   const extra=h.text.split('\n').filter(l=>/@|\d{2,}|www|\.(com|jp|net|org)/i.test(l)).join('\n');
   return {text:v.text+(extra?'\n'+extra:''),conf:v.conf,lines:v.lines};
 }
+async function readLocal(canvas,name,mode){
+  if(mode==='h')return {res:await rec('h',canvas,name+'を横書きとして読み取り中…'),used:'h'};
+  if(mode==='v')return {res:await readVertical(canvas,name),used:'v'};
+  const h=await rec('h',canvas,name+'を読み取り中…');
+  const portrait=canvas.height>canvas.width*1.1;
+  if(h.conf>=75&&!portrait)return {res:h,used:'h'};
+  const v=await readVertical(canvas,name);
+  return v.conf>h.conf+5?{res:v,used:'v'}:{res:h,used:'h'};
+}
 function ocr(side){
   const name=side==='front'?'表':'裏',mode=draft.mode[side],d=draft;
   ocrQueue=ocrQueue.then(async()=>{
     try{
       const canvas=await canvasFor(side);if(!canvas)return;
-      let res,used=mode;
-      if(mode==='h')res=await rec('h',canvas,name+'を横書きとして読み取り中…');
-      else if(mode==='v')res=await readVertical(canvas,name);
-      else{
-        const h=await rec('h',canvas,name+'を読み取り中…');
-        const portrait=canvas.height>canvas.width*1.1;
-        if(h.conf>=75&&!portrait){res=h;used='h';}
-        else{const v=await readVertical(canvas,name);if(v.conf>h.conf+5){res=v;used='v';}else{res=h;used='h';}}
+      const key=gKey();let r=null,note='';
+      if(key&&mode==='auto'){
+        try{setProg(0.4,name+'をGoogle Cloud Visionで読み取り中…');r={res:await gcv(canvas,key),used:'g'};}
+        catch(e){note=gErrText(e)+'、スマホ内の読み取りに切り替えました。';toast(note);}
       }
+      if(!r)r=await readLocal(canvas,name,mode);
       if(d!==draft)return; // 途中で画面を閉じた
-      draft.raw[side]=res.text;draft.lines[side]=res.lines;draft.used[side]=used;
+      draft.raw[side]=r.res.text;draft.lines[side]=r.res.lines;draft.used[side]=r.used;
       applyExtract();renderShots();
-      setProg(1,`${name}を${used==='v'?'縦書き':'横書き'}として読み取りました。うまく読めていなければ向きを切り替えてください。`);
+      const n=gUse();
+      setProg(1,r.used==='g'
+        ?`${name}をGoogle Cloud Visionで読み取りました（今月${n}枚目${n>1000?'・無料枠を超えています':''}）。`
+        :`${note}${name}を${r.used==='v'?'縦書き':'横書き'}として読み取りました。うまく読めていなければ向きを切り替えてください。`);
     }catch(e){
       setProg(0,'読み取れませんでした。通信状態を確認するか、手で入力してください。');
     }
@@ -392,9 +458,9 @@ function renderShots(){for(const side of ['front','back']){const el=$('#s-'+side
   el.innerHTML=shotHTML(side);el.appendChild(inp);
   if(!draft[side]){c.innerHTML='';continue;}
   const m=draft.mode[side],u=draft.used[side];
-  c.innerHTML=`<div class="seg" role="group" aria-label="文字の向き">${[['auto','自動'],['h','横書き'],['v','縦書き']]
+  c.innerHTML=`<div class="seg" role="group" aria-label="読み取り方法">${[['auto',gKey()?'Google':'自動'],['h','横書き'],['v','縦書き']]
     .map(([k,l])=>`<button type="button" data-mode="${side}:${k}" aria-pressed="${m===k}">${l}</button>`).join('')}</div>
-    <div class="ctl-row"><button type="button" data-rot="${side}" aria-label="写真を右に90度回転">↻ 回転</button><span>${m==='auto'&&u?(u==='v'?'縦書きと判定':'横書きと判定'):''}</span></div>`;}}
+    <div class="ctl-row"><button type="button" data-rot="${side}" aria-label="写真を右に90度回転">↻ 回転</button><span>${u==='g'?'Googleで読み取り済み':m==='auto'&&u?(u==='v'?'縦書きと判定':'横書きと判定'):''}</span></div>`;}}
 function openEditor(card,presetPid){
   if(!draft||draft.id!==(card?card.id:'new')){
     draft={id:card?card.id:'new',front:card?.front||'',back:card?.back||'',raw:{front:card?.rawFront||'',back:card?.rawBack||''},lines:{},
@@ -583,6 +649,39 @@ $('#m-restore').addEventListener('change',async e=>{const f=e.target.files[0];e.
     toast(data.cards.length+'枚を復元しました');location.hash='';}
   catch(err){toast('このファイルは名刺帳のバックアップではないようです');}});
 
+/* ---------- 高精度の読み取りの設定 ---------- */
+function renderGcv(msg,ok){
+  const k=gKey(),st=$('#g-status');
+  $('#g-key').value='';
+  $('#g-key').placeholder=k?'設定済み（'+k.slice(0,4)+'…'+k.slice(-4)+'）。変更するときは貼り付け':'AIza で始まるAPIキーを貼り付け';
+  $('#g-clear').hidden=!k;
+  st.textContent=msg||(k?`使用中：今月の読み取り ${gUse()}枚／無料枠 1,000枚`:'未設定：スマホ内の無料の読み取りを使っています');
+  st.dataset.ok=msg?(ok?'1':'0'):(k?'1':'');
+}
+$('#g-save').addEventListener('click',async()=>{
+  const k=$('#g-key').value.trim();
+  if(!k){renderGcv('APIキーを貼り付けてから押してください',false);return;}
+  if(!/^AIza[0-9A-Za-z_\-]{20,}$/.test(k)){renderGcv('APIキーの形ではないようです（AIza で始まる文字列です）',false);return;}
+  $('#g-save').disabled=true;$('#g-status').textContent='接続を確認しています…';$('#g-status').dataset.ok='';
+  try{
+    const c=document.createElement('canvas');c.width=240;c.height=80;const x=c.getContext('2d');
+    x.fillStyle='#fff';x.fillRect(0,0,240,80);x.fillStyle='#000';x.font='bold 40px sans-serif';x.fillText('TEST',40,55);
+    await gcv(c,k);
+    if(!LS.set('gcvKey',k)){renderGcv('このブラウザではキーを保存できませんでした（プライベートモードを解除してください）',false);return;}
+    renderGcv('接続できました。これからの読み取りはGoogle Cloud Visionを使います。',true);
+  }catch(e){
+    renderGcv(e.kind==='net'?'通信できませんでした。電波の良い場所でもう一度押してください。'
+      :/billing/i.test(e.message)?'Google Cloudで請求先アカウント（お支払い情報）を設定してください。'
+      :/disabled|not been used|SERVICE_DISABLED/i.test(e.message)?'Google CloudでCloud Vision APIを有効にしてください。'
+      :/referer|referrer/i.test(e.message)?'APIキーのウェブサイト制限に https://towaueda.github.io/* を追加してください。'
+      :/API key not valid/i.test(e.message)?'APIキーが正しくありません。Google Cloudからコピーし直して貼り付けてください。'
+      :'このキーでは読み取れませんでした（'+e.message.slice(0,80)+'）',false);
+  }finally{$('#g-save').disabled=false;}
+});
+$('#g-clear').addEventListener('click',()=>{const b=$('#g-clear');
+  if(!b.dataset.arm){b.dataset.arm='1';b.textContent='もう一度押すと削除';return;}
+  delete b.dataset.arm;b.textContent='キーを削除';LS.set('gcvKey',null);renderGcv('キーを削除しました。スマホ内の無料の読み取りに戻ります。',true);});
+
 /* ---------- 画面切り替え ---------- */
 function show(id){for(const v of ['v-list','v-detail','v-edit','v-menu'])$('#'+v).hidden=v!==id;
   $('#fab').hidden=id!=='v-list';window.scrollTo(0,0);}
@@ -590,7 +689,7 @@ function route(){
   const h=decodeURIComponent(location.hash.slice(1));
   if(h==='new')return openEditor(null);
   if(h.startsWith('new-'))return openEditor(null,h.slice(4));
-  if(h==='menu')return show('v-menu');
+  if(h==='menu'){renderGcv();return show('v-menu');}
   if(h.startsWith('edit-')){const c=cards.find(x=>x.id===h.slice(5));if(c)return openEditor(c);}
   if(h.startsWith('p-')&&group(h.slice(2)))return showPerson(h.slice(2));
   if(h.startsWith('c-')){const c=cards.find(x=>x.id===h.slice(2));if(c)return location.replace('#p-'+pidOf(c));}
