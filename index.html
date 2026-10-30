@@ -97,6 +97,20 @@ pre{white-space:pre-wrap;font-family:var(--f-mono);font-size:12px;color:var(--mu
 .act button{padding:6px 10px;font-size:12px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(90px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--paper);
   padding:8px 16px;border-radius:999px;font-size:14px;z-index:20}
+.meta .count{display:inline-block;overflow:visible}
+.count{font-size:12px;color:var(--accent);font-weight:700;background:var(--accent-soft);border-radius:999px;padding:1px 8px;margin-left:6px;vertical-align:2px;font-family:var(--f-body)}
+.phead{padding:4px 2px 14px}
+.card-h{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.card-h b{font-size:16px;min-width:0}
+.card-h span{font-size:12px;color:var(--muted);font-family:var(--f-mono)}
+.card-r{display:flex;gap:8px;flex-wrap:wrap}
+.card-r>*{flex:1;white-space:nowrap}
+.mlist{display:flex;flex-direction:column;gap:6px}
+.mlist button{justify-content:space-between;text-align:left;min-width:0}
+.mlist button span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.mlist button small{color:var(--muted);flex:none}
+.mlist button[data-arm="1"]{border-color:var(--accent);color:var(--accent);font-weight:700}
+.dup{border-color:var(--accent);background:var(--accent-soft)}
 @media (prefers-reduced-motion:reduce){.bar i{transition:none}}
 </style>
 </head>
@@ -113,17 +127,17 @@ pre{white-space:pre-wrap;font-family:var(--f-mono);font-size:12px;color:var(--mu
   <div id="list" class="list"></div>
 </section>
 
-<!-- 詳細 -->
+<!-- 人物の詳細 -->
 <section id="v-detail" hidden>
-  <header><a class="btn ghost" href="#">← 一覧</a><span style="flex:1"></span><a class="btn" id="d-edit" href="#">編集</a></header>
+  <header><a class="btn ghost" href="#">← 一覧</a><span style="flex:1"></span><a class="btn" id="p-add" href="#">＋ この人の名刺を追加</a></header>
+  <div class="phead"><p class="d-name" id="p-name"></p><p class="d-sub" id="p-sub"></p></div>
+  <div id="p-cards"></div>
   <div class="sec">
-    <div class="tabs" id="d-tabs"></div>
-    <img id="d-img" class="d-img" alt="名刺の写真">
-    <div><p class="d-name" id="d-name"></p><p class="d-sub" id="d-sub"></p></div>
+    <b>ほかの名刺とまとめる</b>
+    <p class="hint" style="margin:0">別々に登録してしまった同じ人の名刺を、この人にまとめます。</p>
+    <input type="search" id="mg-q" placeholder="名前・会社で探す">
+    <div id="mg-list" class="mlist"></div>
   </div>
-  <div class="sec"><span class="label">タップで開く</span><div class="acts" id="d-acts"></div></div>
-  <div class="sec" id="d-note-sec"><span class="label">メモ</span><div id="d-note" style="white-space:pre-wrap"></div></div>
-  <div class="row"><button id="d-del" class="danger">この名刺を削除</button></div>
 </section>
 
 <!-- 追加・編集 -->
@@ -149,6 +163,11 @@ pre{white-space:pre-wrap;font-family:var(--f-mono);font-size:12px;color:var(--mu
     <div><label class="label" for="e-note">メモ</label><textarea id="e-note" style="font-family:var(--f-body)" placeholder="会った日・場所など"></textarea></div>
     <p class="hint">名前・役職・住所は文字の大きさや書き方から推測して入れています。間違っていたらここで直してください。</p>
     <details><summary>読み取った全文を見る</summary><pre id="e-raw">（まだありません）</pre></details>
+  </div>
+  <div class="sec dup" id="e-dup" hidden>
+    <b id="e-dup-t"></b>
+    <p class="hint" style="margin:0">同じ人としてまとめると、名刺が1か所に並んで表示されます。</p>
+    <div class="row"><button class="primary" id="e-dup-yes">同じ人としてまとめて保存</button><button id="e-dup-no">別の人として保存</button></div>
   </div>
   <div class="row"><button class="primary" id="e-save">保存する</button></div>
 </section>
@@ -232,7 +251,7 @@ const RE_ADDR=/(〒|\d{3}-\d{4}|東京都|北海道|京都府|大阪府|[^\s]{2,
 function guess(ocrLines,raw){
   const out={name:'',role:'',addr:''};
   const L=(ocrLines.length?ocrLines:normalize(raw).split('\n').map(t=>({text:t,size:0})))
-    .map(l=>({t:normalize(l.text).replace(/\s{2,}/g,' ').trim(),size:l.size})).filter(l=>l.t);
+    .map(l=>({t:normalize(l.text).replace(/\s{2,}/g,' ').trim(),size:l.size,box:l.box,v:l.v})).filter(l=>l.t);
   // 住所：〒・都道府県・丁目などを含む行（電話番号は取り除く）
   const addr=L.filter(l=>RE_ADDR.test(l.t)&&!/@|www\.|https?:/i.test(l.t))
     .map(l=>l.t.replace(/(TEL|FAX|Tel|Fax|電話|携帯)[\s.:]*[\d\-+() ]{9,}/g,'').replace(/(?:\+81|0)\d{1,4}-\d{1,4}-\d{3,4}/g,'').trim()).filter(Boolean);
@@ -245,17 +264,33 @@ function guess(ocrLines,raw){
   const roles=L.filter(l=>RE_ROLE.test(l.t)&&!RE_CO.test(l.t)&&!RE_ADDR.test(l.t)&&!/@|\d{3,}/.test(l.t)&&l.t.length<=30);
   out.role=[...new Set(roles.map(l=>l.t))].slice(0,2).join(' ');
   // 名前：会社・役職・住所・連絡先でない短い行のうち、いちばん大きな文字
-  const cands=[];
+  // 苗字と名前の間が大きく空いた名刺は、間に入るゴミ文字（__ | . など）を取り除き、別の行に分かれたものはつなげる
+  const clean=t=>t.replace(/([゠-ヿ])-(?=[゠-ヿ])/g,'$1ー')
+    .replace(/[^㐀-鿿々〆ヶ぀-ヿA-Za-z'\s\-]/g,' ').replace(/(^|\s)[-_'A-Za-z](?=\s|$)/g,' ').replace(/\s+/g,' ').trim();
+  const EN=t=>/^[A-Z][A-Za-z'\-]+(\s[A-Z][A-Za-z'\-.]+){1,2}$/.test(t)&&!/^[A-Z\s]+$/.test(t.replace(/\s/g,'').slice(1))||/^[A-Z][a-z]+\s[A-Z]{2,}$/.test(t);
+  const JAC=/^[㐀-鿿々〆ヶ぀-ヿ]+$/;
+  const cands=[],frag=[];
   for(const l of L){
-    let t=l.t;
-    if(RE_CO.test(t)||RE_ADDR.test(t)||/[@\d]|www|https?|\.(com|jp)/i.test(t))continue;
-    if(RE_ROLE.test(t))continue;
-    const ja=JA.test(t);
-    const en=/^[A-Z][A-Za-z'\-]+(\s[A-Z][A-Za-z'\-.]+){1,2}$/.test(t)&&!/^[A-Z\s]+$/.test(t.replace(/\s/g,'').slice(1))||/^[A-Z][a-z]+\s[A-Z]{2,}$/.test(t);
-    if(!ja&&!en)continue;
-    const kana=/^[\u3040-\u30ff\s]+$/.test(t); // ふりがな行は優先度を下げる
-    const len=t.replace(/\s/g,'').length;
-    cands.push({t,score:l.size*(ja?1.2:1)*(kana?0.5:1)*(len>=2&&len<=5?1.1:1)});
+    if(RE_CO.test(l.t)||RE_ADDR.test(l.t)||/[@\d]|www|https?|\.(com|jp)/i.test(l.t))continue;
+    const t=clean(l.t);
+    if(!t||RE_ROLE.test(t))continue;
+    const ja=JA.test(t),en=EN(t),len=t.replace(/\s/g,'').length;
+    if(ja||en){
+      const kana=/^[぀-ヿ\s]+$/.test(t); // ふりがな行は優先度を下げる
+      cands.push({t,score:l.size*(ja?1.2:1)*(kana?0.5:1)*(len>=2&&len<=5?1.1:1)});
+    }
+    if(l.box&&len<=5&&JAC.test(t.replace(/\s/g,'')))frag.push({t:t.replace(/\s/g,''),l});
+  }
+  // 同じ行（縦書きは同じ列）に並んだ、同じ大きさの文字をつなげる（「山田」＋「太郎」）
+  for(const a of frag)for(const b of frag){
+    if(a===b||a.l.v!==b.l.v)continue;
+    const A=a.l.box,B=b.l.box,s=(a.l.size+b.l.size)/2;
+    if(Math.min(a.l.size,b.l.size)/Math.max(a.l.size,b.l.size)<0.75)continue;
+    const off=a.l.v?Math.abs((A.x0+A.x1)-(B.x0+B.x1))/2:Math.abs((A.y0+A.y1)-(B.y0+B.y1))/2;
+    const gap=a.l.v?B.y0-A.y1:B.x0-A.x1;
+    if(off>s*0.5||gap<-s*0.2||gap>s*8)continue;
+    const t=a.t+' '+b.t;if(t.length>9)continue;
+    cands.push({t,score:s*1.2*1.1*1.3});
   }
   cands.sort((a,b)=>b.score-a.score);
   if(cands[0])out.name=cands[0].t;
@@ -296,7 +331,7 @@ function getWorker(kind){
 async function rec(kind,canvas,label){phase=label;const w=await getWorker(kind);const {data}=await w.recognize(canvas);
   // 行ごとの文字の大きさ（横書きは高さ、縦書きは幅）
   const ls=(data.lines||[]).filter(l=>l.confidence>30&&l.text.trim()).map(l=>({text:l.text.trim(),
-    size:kind==='v'?l.bbox.x1-l.bbox.x0:l.bbox.y1-l.bbox.y0}));
+    size:kind==='v'?l.bbox.x1-l.bbox.x0:l.bbox.y1-l.bbox.y0,box:l.bbox,v:kind==='v'}));
   return {text:data.text||'',conf:data.confidence||0,lines:ls};}
 // 縦書き名刺：日本語は縦書きで読み、横倒しで書かれたメール・URL・番号は回転させて読む
 async function readVertical(canvas,name){
@@ -360,10 +395,10 @@ function renderShots(){for(const side of ['front','back']){const el=$('#s-'+side
   c.innerHTML=`<div class="seg" role="group" aria-label="文字の向き">${[['auto','自動'],['h','横書き'],['v','縦書き']]
     .map(([k,l])=>`<button type="button" data-mode="${side}:${k}" aria-pressed="${m===k}">${l}</button>`).join('')}</div>
     <div class="ctl-row"><button type="button" data-rot="${side}" aria-label="写真を右に90度回転">↻ 回転</button><span>${m==='auto'&&u?(u==='v'?'縦書きと判定':'横書きと判定'):''}</span></div>`;}}
-function openEditor(card){
+function openEditor(card,presetPid){
   if(!draft||draft.id!==(card?card.id:'new')){
     draft={id:card?card.id:'new',front:card?.front||'',back:card?.back||'',raw:{front:card?.rawFront||'',back:card?.rawBack||''},lines:{},
-      canvas:{},mode:{front:'auto',back:'auto'},used:{},auto:null};
+      canvas:{},mode:{front:'auto',back:'auto'},used:{},auto:null,personId:card?pidOf(card):(presetPid||''),dupOk:false};
     $('#e-name').value=card?.name||'';$('#e-company').value=card?.company||'';$('#e-role').value=card?.role||'';$('#e-addr').value=card?.addr||'';
     $('#e-phones').value=(card?.phones||[]).map(phoneToLine).join('\n');
     $('#e-emails').value=(card?.emails||[]).join('\n');$('#e-urls').value=(card?.urls||[]).join('\n');
@@ -371,8 +406,10 @@ function openEditor(card){
     $('#e-raw').textContent=[draft.raw.front,draft.raw.back].filter(Boolean).join('\n\n')||'（まだありません）';
     $('#prog').hidden=true;
   }
-  $('#e-title').textContent=card?'名刺を編集':'名刺を追加';
-  $('#e-cancel').href=card?'#c-'+card.id:'#';
+  const pn=draft.personId&&!card?personName(draft.personId):'';
+  $('#e-title').textContent=card?'名刺を編集':(pn?pn+'さんの名刺を追加':'名刺を追加');
+  $('#e-cancel').href=draft.personId?'#p-'+draft.personId:'#';
+  $('#e-dup').hidden=true;
   renderShots();show('v-edit');
 }
 for(const side of ['front','back']){
@@ -389,68 +426,145 @@ document.addEventListener('click',async e=>{
     draft.canvas[side]=c;draft[side]=toStored(c);renderShots();ocr(side);}catch(err){toast(err.message);}}
   else if(md){const [side,m]=md.dataset.mode.split(':');draft.mode[side]=m;renderShots();ocr(side);}
 });
-$('#e-save').addEventListener('click',async()=>{
+/* ---------- 人物（同じ人の名刺をまとめる） ---------- */
+const pidOf=c=>c.personId||c.id;
+const nameKey=n=>(n||'').replace(/[\s　]/g,'').toLowerCase();
+const telKey=n=>n.replace(/\D/g,'').replace(/^81/,'0');
+function groups(){const m=new Map();
+  for(const c of cards){const k=pidOf(c);if(!m.has(k))m.set(k,[]);m.get(k).push(c);}
+  const gs=[...m.entries()].map(([pid,cs])=>{cs.sort((a,b)=>(b.created||0)-(a.created||0));
+    const named=cs.find(c=>c.name)||cs[0];
+    return {pid,cards:cs,name:named.name,latest:cs[0],last:Math.max(...cs.map(c=>c.updated||c.created||0))};});
+  return gs.sort((a,b)=>b.last-a.last);}
+const group=pid=>groups().find(g=>g.pid===pid);
+const personName=pid=>{const g=group(pid);return g?(g.name||g.latest.company||'名前未入力'):''};
+// 名前・メール・携帯番号のどれかが同じなら、同じ人の候補にする（会社の代表番号は同僚と重なるので見ない）
+function findSamePerson(card){
+  const nk=nameKey(card.name),em=new Set(card.emails.map(e=>e.toLowerCase())),
+    mob=new Set(card.phones.filter(p=>p.label==='携帯').map(p=>telKey(p.num)));
+  for(const g of groups()){
+    if(g.pid===card.personId)continue;
+    for(const c of g.cards){
+      if(nk.length>=2&&nameKey(c.name)===nk)return g;
+      if(c.emails.some(e=>em.has(e.toLowerCase())))return g;
+      if(c.phones.some(p=>p.label==='携帯'&&mob.has(telKey(p.num))))return g;
+    }
+  }
+  return null;
+}
+async function saveCard(){
   const old=cards.find(c=>c.id===draft.id);
-  const card={id:old?old.id:(Date.now().toString(36)+Math.random().toString(36).slice(2,6)),created:old?.created||Date.now(),
+  const id=old?old.id:(Date.now().toString(36)+Math.random().toString(36).slice(2,6));
+  const card={id,created:old?.created||Date.now(),personId:draft.personId||'',
     updated:Date.now(),name:$('#e-name').value.trim(),company:$('#e-company').value.trim(),role:$('#e-role').value.trim(),addr:$('#e-addr').value.trim(),
     phones:parsePhones($('#e-phones').value),emails:lines($('#e-emails').value),
     urls:lines($('#e-urls').value).map(u=>/^https?:/i.test(u)?u:'https://'+u),
     note:$('#e-note').value.trim(),front:draft.front,back:draft.back,rawFront:draft.raw.front,rawBack:draft.raw.back};
   if(!card.front&&!card.name&&!card.company&&!card.phones.length&&!card.emails.length){toast('写真を撮るか、名前などを入力してください');return;}
+  // 新しく追加する名刺で、すでに同じ人がいそうなら確認する
+  if(!old&&!draft.personId&&!draft.dupOk){
+    const g=findSamePerson(card);
+    if(g){draft.dupTarget=g.pid;
+      $('#e-dup-t').textContent=`「${g.name||g.latest.company||'名前未入力'}」${g.latest.company&&g.name?'（'+g.latest.company+'）':''}さんの名刺がすでに${g.cards.length}枚あります。`;
+      $('#e-dup').hidden=false;$('#e-dup').scrollIntoView({behavior:'smooth',block:'center'});return;}
+  }
+  if(!card.personId)card.personId=id;
   try{await dbPut(card);}catch(e){toast('保存できませんでした（空き容量を確認してください）');return;}
-  cards=cards.filter(c=>c.id!==card.id);cards.unshift(card);draft=null;toast('保存しました');location.hash='c-'+card.id;
-});
+  cards=cards.filter(c=>c.id!==card.id);cards.push(card);draft=null;toast('保存しました');location.hash='p-'+card.personId;
+}
+$('#e-save').addEventListener('click',saveCard);
+$('#e-dup-yes').addEventListener('click',()=>{draft.personId=draft.dupTarget;saveCard();});
+$('#e-dup-no').addEventListener('click',()=>{draft.dupOk=true;saveCard();});
 
 /* ---------- 一覧 ---------- */
-function chipsHTML(c){
-  const a=[];
-  c.phones.filter(p=>p.label!=='FAX').slice(0,2).forEach(p=>a.push(`<a class="chip" href="${telHref(p.num)}">☎ ${esc(p.label==='携帯'?'携帯':'電話')}</a>`));
-  c.emails.slice(0,1).forEach(m=>a.push(`<a class="chip" href="mailto:${esc(m)}">✉ メール</a>`));
-  c.urls.slice(0,1).forEach(u=>a.push(`<a class="chip" href="${esc(u)}" target="_blank" rel="noopener">↗ サイト</a>`));
+function chipsHTML(cs){
+  const a=[],seen=new Set();
+  const once=k=>{if(seen.has(k))return false;seen.add(k);return true;};
+  const phones=cs.flatMap(c=>c.phones).filter(p=>p.label!=='FAX'&&once('t'+telKey(p.num)));
+  phones.sort((x,y)=>(y.label==='携帯')-(x.label==='携帯'));
+  phones.slice(0,2).forEach(p=>a.push(`<a class="chip" href="${telHref(p.num)}">☎ ${p.label==='携帯'?'携帯':'電話'}</a>`));
+  cs.flatMap(c=>c.emails).filter(m=>once('m'+m.toLowerCase())).slice(0,1).forEach(m=>a.push(`<a class="chip" href="mailto:${esc(m)}">✉ メール</a>`));
+  cs.flatMap(c=>c.urls).filter(u=>once('u'+u)).slice(0,1).forEach(u=>a.push(`<a class="chip" href="${esc(u)}" target="_blank" rel="noopener">↗ サイト</a>`));
   return a.join('');
 }
+const cardText=c=>[c.name,c.company,c.role,c.addr,c.note,c.rawFront,c.rawBack,...c.emails,...c.urls,...c.phones.map(p=>p.num+' '+p.num.replace(/\D/g,''))].join(' ').toLowerCase();
 function renderList(){
-  const q=$('#q').value.trim().toLowerCase();
-  const hit=c=>!q||[c.name,c.company,c.role,c.addr,c.note,c.rawFront,c.rawBack,...c.emails,...c.urls,...c.phones.map(p=>p.num+p.num.replace(/\D/g,''))]
-    .join(' ').toLowerCase().includes(q);
-  const shown=cards.filter(hit);
-  $('#count').textContent=cards.length?cards.length+'枚':'';
+  const q=$('#q').value.trim().toLowerCase(),gs=groups();
+  const shown=gs.filter(g=>!q||g.cards.some(c=>cardText(c).includes(q)));
+  $('#count').textContent=cards.length?(gs.length===cards.length?cards.length+'枚':`${gs.length}人・${cards.length}枚`):'';
   if(!cards.length){$('#list').innerHTML=`<div class="empty"><b>まだ名刺がありません</b>右下の「＋」から名刺の表（と裏）を撮影すると、<br>電話番号・メール・Webサイトを読み取ってタップで開けるようにします。</div>`;return;}
   if(!shown.length){$('#list').innerHTML=`<div class="empty">「${esc(q)}」に一致する名刺はありません</div>`;return;}
-  $('#list').innerHTML=shown.map(c=>`<div class="item" data-id="${c.id}">
+  $('#list').innerHTML=shown.map(g=>{const c=g.latest,ch=chipsHTML(g.cards);
+    return `<div class="item" data-pid="${esc(g.pid)}">
     ${c.front?`<img class="thumb" src="${c.front}" alt="">`:`<div class="thumb"></div>`}
-    <div class="meta"><b>${esc(c.name||c.company||'名前未入力')}</b><span>${esc(c.name?c.company:'')}</span><span>${esc(c.role)}</span></div>
-    ${chipsHTML(c)?`<div class="chips">${chipsHTML(c)}</div>`:''}</div>`).join('');
+    <div class="meta"><b>${esc(g.name||c.company||'名前未入力')}${g.cards.length>1?`<span class="count">名刺${g.cards.length}枚</span>`:''}</b><span>${esc(g.name?c.company:'')}</span><span>${esc(c.role)}</span></div>
+    ${ch?`<div class="chips">${ch}</div>`:''}</div>`;}).join('');
 }
 $('#q').addEventListener('input',renderList);
-$('#list').addEventListener('click',e=>{if(e.target.closest('a'))return;const it=e.target.closest('.item');if(it)location.hash='c-'+it.dataset.id;});
+$('#list').addEventListener('click',e=>{if(e.target.closest('a'))return;const it=e.target.closest('.item');if(it)location.hash='p-'+it.dataset.pid;});
 
-/* ---------- 詳細 ---------- */
-function showDetail(c){
-  $('#d-edit').href='#edit-'+c.id;
+/* ---------- 人物の詳細 ---------- */
+let curPid=null,cardActs={};
+function cardHTML(c,i,n,personNm){
   const sides=[['front','表'],['back','裏']].filter(([s])=>c[s]);
-  const setSide=s=>{$('#d-img').src=c[s];$('#d-tabs').querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.s===s));};
-  $('#d-tabs').innerHTML=sides.length>1?sides.map(([s,l])=>`<button type="button" data-s="${s}">${l}</button>`).join(''):'';
-  $('#d-tabs').onclick=e=>{const b=e.target.closest('button');if(b)setSide(b.dataset.s);};
-  $('#d-img').hidden=!sides.length; if(sides.length)setSide(sides[0][0]);
-  $('#d-name').textContent=c.name||c.company||'名前未入力';
-  $('#d-sub').textContent=[c.name?c.company:'',c.role].filter(Boolean).join('　');
   const acts=[];
   c.phones.forEach(p=>acts.push({tag:p.label,href:p.label==='FAX'?'':telHref(p.num),text:p.num}));
   c.emails.forEach(m=>acts.push({tag:'メール',href:'mailto:'+m,text:m}));
   if(c.addr)acts.push({tag:'住所',href:'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(c.addr),text:c.addr,blank:true});
   c.urls.forEach(u=>acts.push({tag:'Web',href:u,text:u.replace(/^https?:\/\//,''),blank:true}));
-  $('#d-acts').innerHTML=acts.length?acts.map((a,i)=>`<div class="act"><span class="tag">${esc(a.tag)}</span>
-    ${a.href?`<a href="${esc(a.href)}"${a.blank?' target="_blank" rel="noopener"':''}>${esc(a.text)}</a>`:`<span style="font-family:var(--f-mono);padding:8px 0">${esc(a.text)}</span>`}
-    <button type="button" data-copy="${i}">コピー</button></div>`).join('')
-    :'<p class="hint" style="margin:0">電話番号・メール・Webサイトがまだありません。「編集」から追加できます。</p>';
-  $('#d-acts').onclick=e=>{const b=e.target.closest('[data-copy]');if(b)copy(acts[+b.dataset.copy].text);};
-  $('#d-note-sec').hidden=!c.note;$('#d-note').textContent=c.note;
-  const del=$('#d-del');del.textContent='この名刺を削除';del.dataset.arm='';
-  del.onclick=async()=>{if(!del.dataset.arm){del.dataset.arm='1';del.textContent='もう一度押すと削除します';return;}
-    await dbDel(c.id);cards=cards.filter(x=>x.id!==c.id);toast('削除しました');location.hash='';};
+  cardActs[c.id]=acts;
+  const d=new Date(c.created||Date.now()).toLocaleDateString('ja-JP');
+  return `<div class="sec" data-card="${esc(c.id)}">
+    <div class="card-h"><b>${esc(c.company||'会社名なし')}</b><span>${n>1?`${i+1}/${n}・`:''}${d} 登録</span></div>
+    ${c.role||(c.name&&c.name!==personNm)?`<p class="d-sub">${esc([c.name!==personNm?c.name:'',c.role].filter(Boolean).join('　'))}</p>`:''}
+    ${sides.length>1?`<div class="tabs">${sides.map(([s,l],k)=>`<button type="button" data-side="${s}" aria-pressed="${k===0}">${l}</button>`).join('')}</div>`:''}
+    ${sides.length?`<img class="d-img" src="${c[sides[0][0]]}" alt="名刺の写真">`:''}
+    <div class="acts">${acts.length?acts.map((a,k)=>`<div class="act"><span class="tag">${esc(a.tag)}</span>
+      ${a.href?`<a href="${esc(a.href)}"${a.blank?' target="_blank" rel="noopener"':''}>${esc(a.text)}</a>`:`<span style="font-family:var(--f-mono);padding:8px 0">${esc(a.text)}</span>`}
+      <button type="button" data-copy="${k}">コピー</button></div>`).join('')
+      :'<p class="hint" style="margin:0">電話番号・メール・Webサイトがまだありません。「編集」から追加できます。</p>'}</div>
+    ${c.note?`<div><span class="label">メモ</span><div style="white-space:pre-wrap">${esc(c.note)}</div></div>`:''}
+    <div class="card-r"><a class="btn" href="#edit-${esc(c.id)}">編集</a>${n>1?'<button type="button" data-split>別の人に分ける</button>':''}<button type="button" class="danger" data-del>削除</button></div>
+  </div>`;
+}
+function showPerson(pid){
+  const g=group(pid);if(!g){location.hash='';return;}
+  curPid=pid;cardActs={};
+  const nm=g.name||g.latest.company||'名前未入力';
+  $('#p-name').textContent=nm;
+  $('#p-sub').textContent=g.cards.length>1?`名刺${g.cards.length}枚（新しい順）`:[g.name?g.latest.company:'',g.latest.role].filter(Boolean).join('　');
+  $('#p-add').href='#new-'+pid;
+  $('#p-cards').innerHTML=g.cards.map((c,i)=>cardHTML(c,i,g.cards.length,g.name)).join('');
+  $('#mg-q').value='';renderMerge();
   show('v-detail');
 }
+$('#p-cards').addEventListener('click',async e=>{
+  const box=e.target.closest('[data-card]');if(!box)return;
+  const c=cards.find(x=>x.id===box.dataset.card);if(!c)return;
+  const side=e.target.closest('[data-side]'),cp=e.target.closest('[data-copy]'),sp=e.target.closest('[data-split]'),del=e.target.closest('[data-del]');
+  if(side){box.querySelector('.d-img').src=c[side.dataset.side];box.querySelectorAll('[data-side]').forEach(b=>b.setAttribute('aria-pressed',b===side));}
+  else if(cp)copy(cardActs[c.id][+cp.dataset.copy].text);
+  else if(sp){if(!sp.dataset.arm){sp.dataset.arm='1';sp.textContent='もう一度押すと分けます';return;}
+    c.personId=c.id+'p';await dbPut(c);toast('別の人として分けました');showPerson(curPid);}
+  else if(del){if(!del.dataset.arm){del.dataset.arm='1';del.textContent='もう一度押すと削除';return;}
+    await dbDel(c.id);cards=cards.filter(x=>x.id!==c.id);toast('削除しました');
+    if(group(curPid))showPerson(curPid);else location.hash='';}
+});
+function renderMerge(){
+  const q=$('#mg-q').value.trim().toLowerCase();
+  const gs=groups().filter(g=>g.pid!==curPid&&(!q||g.cards.some(c=>cardText(c).includes(q))));
+  $('#mg-list').innerHTML=gs.length?gs.slice(0,30).map(g=>`<button type="button" data-pid="${esc(g.pid)}"><span>${esc(g.name||g.latest.company||'名前未入力')}${g.name&&g.latest.company?'　'+esc(g.latest.company):''}</span><small>${g.cards.length}枚</small></button>`).join('')
+    :`<p class="hint" style="margin:0">${q?'一致する名刺はありません':'ほかの名刺はまだありません'}</p>`;
+}
+$('#mg-q').addEventListener('input',renderMerge);
+$('#mg-list').addEventListener('click',async e=>{
+  const b=e.target.closest('[data-pid]');if(!b)return;
+  if(!b.dataset.arm){$('#mg-list').querySelectorAll('[data-arm]').forEach(x=>{delete x.dataset.arm;});b.dataset.arm='1';
+    b.querySelector('small').textContent='もう一度押すとまとめます';return;}
+  const from=group(b.dataset.pid);if(!from)return;
+  for(const c of from.cards){c.personId=curPid;await dbPut(c);}
+  toast(`${from.cards.length}枚をまとめました`);showPerson(curPid);
+});
 
 /* ---------- バックアップ・CSV ---------- */
 function download(name,blob){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;
@@ -460,7 +574,7 @@ $('#m-backup').onclick=()=>download(`名刺帳バックアップ_${stamp()}.json
 $('#m-csv').onclick=()=>{
   const q=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
   const rows=[['名前','会社名','部署・役職','住所','電話','メール','Webサイト','メモ','登録日']]
-    .concat(cards.map(c=>[c.name,c.company,c.role,c.addr,c.phones.map(phoneToLine).join(' / '),c.emails.join(' / '),c.urls.join(' / '),c.note,new Date(c.created).toLocaleDateString('ja-JP')]));
+    .concat(groups().flatMap(g=>g.cards).map(c=>[c.name,c.company,c.role,c.addr,c.phones.map(phoneToLine).join(' / '),c.emails.join(' / '),c.urls.join(' / '),c.note,new Date(c.created).toLocaleDateString('ja-JP')]));
   download(`名刺帳_${stamp()}.csv`,new Blob(['\ufeff'+rows.map(r=>r.map(q).join(',')).join('\r\n')],{type:'text/csv'}));
 };
 $('#m-restore').addEventListener('change',async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;
@@ -475,9 +589,11 @@ function show(id){for(const v of ['v-list','v-detail','v-edit','v-menu'])$('#'+v
 function route(){
   const h=decodeURIComponent(location.hash.slice(1));
   if(h==='new')return openEditor(null);
+  if(h.startsWith('new-'))return openEditor(null,h.slice(4));
   if(h==='menu')return show('v-menu');
   if(h.startsWith('edit-')){const c=cards.find(x=>x.id===h.slice(5));if(c)return openEditor(c);}
-  if(h.startsWith('c-')){const c=cards.find(x=>x.id===h.slice(2));if(c)return showDetail(c);}
+  if(h.startsWith('p-')&&group(h.slice(2)))return showPerson(h.slice(2));
+  if(h.startsWith('c-')){const c=cards.find(x=>x.id===h.slice(2));if(c)return location.replace('#p-'+pidOf(c));}
   draft=null;renderList();show('v-list');
 }
 $('#fab').onclick=()=>{draft=null;location.hash='new';};
